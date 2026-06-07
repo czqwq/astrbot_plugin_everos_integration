@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EverOS · 进化中枢</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app" class="loading">
+
+  <!-- ═══ 顶栏 ═══ -->
+  <header class="topbar">
+    <div class="topbar__left">
+      <div class="topbar__brand">
+        <span class="topbar__logo">◈</span>
+        <span class="topbar__title">EverOS</span>
+        <span class="topbar__badge" id="topbar-badge">v1.0</span>
+      </div>
+      <div class="topbar__status" id="topbar-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">检查中</span>
+        <span class="status-latency" id="status-latency"></span>
+      </div>
+    </div>
+    <div class="topbar__right">
+      <div class="topbar__stats" id="topbar-total">
+        <span class="topbar__stat-num" id="header-total">—</span>
+        <span class="topbar__stat-label">记忆</span>
+      </div>
+      <button class="btn btn--icon" id="theme-toggle" title="切换主题">
+        <span id="theme-icon">☀</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ 标签导航 ═══ -->
+  <nav class="tabs" id="main-tabs">
+    <button class="tab active" data-tab="overview">
+      <span class="tab__icon">◉</span>
+      <span>总览</span>
+    </button>
+    <button class="tab" data-tab="memories">
+      <span class="tab__icon">▤</span>
+      <span>记忆仓库</span>
+      <span class="tab__count" id="tab-count-memories"></span>
+    </button>
+    <button class="tab" data-tab="search">
+      <span class="tab__icon">◎</span>
+      <span>检索</span>
+    </button>
+    <button class="tab" data-tab="skills">
+      <span class="tab__icon">⚙</span>
+      <span>技能库</span>
+      <span class="tab__count" id="tab-count-skills"></span>
+    </button>
+    <button class="tab" data-tab="system">
+      <span class="tab__icon">⊞</span>
+      <span>系统</span>
+    </button>
+    <button class="tab" data-tab="settings">
+      <span class="tab__icon">⋯</span>
+      <span>设置</span>
+    </button>
+  </nav>
+
+  <!-- ═══ 内容区 ═══ -->
+
+  <!-- ── 总览 ── -->
+  <section class="tab-panel active" data-panel="overview">
+    <div class="panel-header">
+      <h2 class="panel-title">系统总览</h2>
+      <span class="panel-meta" id="overview-meta">—</span>
+    </div>
+
+    <!-- 双栏布局：健康卡片 + 快捷操作 -->
+    <div class="overview-grid">
+      <div class="overview-grid__main">
+        <!-- 健康卡片 -->
+        <div class="health-card" id="health-card">
+          <div class="health-card__icon" id="health-icon">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <div class="health-card__info">
+            <div class="health-card__title" id="health-title">检查连接中</div>
+            <div class="health-card__addr" id="health-addr">
+              <code>—</code> · <span id="health-latency">—</span>
+            </div>
+            <div class="health-card__sub" id="health-sub">EverOS 自进化记忆系统</div>
+          </div>
+          <div class="health-card__extra" id="health-extra">
+            <div class="health-tag"><span class="health-tag__label">App</span><code id="health-app">—</code></div>
+            <div class="health-tag"><span class="health-tag__label">Project</span><code id="health-project">—</code></div>
+          </div>
+        </div>
+
+        <!-- 记忆体征（带比例条） -->
+        <h3 class="section-title">记忆分布</h3>
+        <div class="vitals" id="vitals">
+          <div class="vital" data-key="episode" data-color="var(--blue)">
+            <div class="vital__bar" id="bar-episode" style="width:0%"></div>
+            <div class="vital__num" id="v-episode">—</div>
+            <div class="vital__label">Episodes</div>
+          </div>
+          <div class="vital" data-key="atomic_fact" data-color="var(--purple)">
+            <div class="vital__bar" id="bar-fact" style="width:0%"></div>
+            <div class="vital__num" id="v-fact">—</div>
+            <div class="vital__label">Facts</div>
+          </div>
+          <div class="vital" data-key="agent_case" data-color="var(--amber)">
+            <div class="vital__bar" id="bar-case" style="width:0%"></div>
+            <div class="vital__num" id="v-case">—</div>
+            <div class="vital__label">Cases</div>
+          </div>
+          <div class="vital" data-key="agent_skill" data-color="var(--green)">
+            <div class="vital__bar" id="bar-skill" style="width:0%"></div>
+            <div class="vital__num" id="v-skill">—</div>
+            <div class="vital__label">Skills</div>
+          </div>
+          <div class="vital vital--accent" data-key="total">
+            <div class="vital__num" id="v-total">—</div>
+            <div class="vital__label">总计</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：快捷操作 -->
+      <div class="overview-grid__side">
+        <div class="quick-actions">
+          <div class="quick-actions__head">
+            <span class="quick-actions__title">快捷操作</span>
+          </div>
+          <div class="quick-actions__body">
+            <button class="quick-btn" id="qa-write">
+              <span class="quick-btn__icon">✎</span>
+              <div class="quick-btn__info">
+                <span class="quick-btn__title">写入记忆</span>
+                <span class="quick-btn__desc">向 EverOS 添加新记忆</span>
+              </div>
+            </button>
+            <button class="quick-btn" id="qa-search">
+              <span class="quick-btn__icon">◎</span>
+              <div class="quick-btn__info">
+                <span class="quick-btn__title">快速检索</span>
+                <span class="quick-btn__desc">语义搜索记忆库</span>
+              </div>
+            </button>
+            <button class="quick-btn" id="qa-flush">
+              <span class="quick-btn__icon">↻</span>
+              <div class="quick-btn__info">
+                <span class="quick-btn__title">触发提炼</span>
+                <span class="quick-btn__desc">强制 EverOS 提取新记忆</span>
+              </div>
+            </button>
+          </div>
+          <div class="quick-actions__foot">
+            <span class="quick-actions__uptime" id="uptime-display">系统运行中</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统组件状态 -->
+    <h3 class="section-title">组件状态</h3>
+    <div class="components" id="components">
+      <div class="component"><span class="component__dot" id="comp-llm"></span>LLM</div>
+      <div class="component"><span class="component__dot" id="comp-sqlite"></span>SQLite</div>
+      <div class="component"><span class="component__dot" id="comp-lancedb"></span>LanceDB</div>
+      <div class="component"><span class="component__dot" id="comp-cascade"></span>Cascade</div>
+      <div class="component"><span class="component__dot" id="comp-ome"></span>OME</div>
+    </div>
+
+    <!-- 最近活动 + 快速统计 -->
+    <div class="activity-section">
+      <div class="activity-section__main">
+        <h3 class="section-title">最近活动</h3>
+        <div class="activity" id="activity">
+          <p class="empty-state">暂无活动记录</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 记忆仓库 ── -->
+  <section class="tab-panel" data-panel="memories">
+    <div class="panel-header">
+      <h2 class="panel-title">记忆仓库</h2>
+      <div class="panel-actions">
+        <button class="btn btn--sm btn--ghost" id="mem-refresh">
+          <span class="btn__icon">↻</span> 刷新
+        </button>
+        <button class="btn btn--sm btn--primary" id="mem-write-btn">
+          <span class="btn__icon">+</span> 写入
+        </button>
+      </div>
+    </div>
+
+    <!-- 类型筛选 + 统计 -->
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all">全部 <span class="filter-count" id="f-all"></span></button>
+      <button class="filter-btn" data-filter="episode">Episodes <span class="filter-count" id="f-episode"></span></button>
+      <button class="filter-btn" data-filter="atomic_fact">Facts <span class="filter-count" id="f-fact"></span></button>
+      <button class="filter-btn" data-filter="agent_case">Cases <span class="filter-count" id="f-case"></span></button>
+      <button class="filter-btn" data-filter="agent_skill">Skills <span class="filter-count" id="f-skill"></span></button>
+    </div>
+
+    <div class="mem-list" id="mem-list">
+      <p class="empty-state">加载中...</p>
+    </div>
+
+    <!-- 写入面板（浮动） -->
+    <div class="write-panel hidden" id="write-panel">
+      <div class="write-panel__backdrop" id="write-backdrop"></div>
+      <div class="write-panel__card">
+        <div class="write-panel__head">
+          <span>写入记忆</span>
+          <button class="btn btn--icon btn--sm" id="write-close">✕</button>
+        </div>
+        <div class="write-panel__body">
+          <select id="write-type" class="input">
+            <option value="atomic_fact">Facts · 事实</option>
+            <option value="episode">Episodes · 片段</option>
+            <option value="agent_case">Cases · 案例</option>
+            <option value="agent_skill">Skills · 技能</option>
+          </select>
+          <textarea id="write-content" class="input input--area" placeholder="输入记忆内容..." rows="3"></textarea>
+          <button class="btn btn--primary btn--full" id="write-submit">提交</button>
+          <pre class="write-result" id="write-result"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 检索 ── -->
+  <section class="tab-panel" data-panel="search">
+    <div class="panel-header">
+      <h2 class="panel-title">语义检索</h2>
+      <span class="panel-meta" id="search-meta">混合检索 · 向量 + BM25</span>
+    </div>
+    <div class="search-box">
+      <input id="search-input" class="input input--search" type="text" placeholder="搜索记忆内容… 支持自然语言描述" />
+      <button class="btn btn--primary" id="search-btn">检索</button>
+    </div>
+    <div class="search-results" id="search-results">
+      <p class="empty-state">输入关键词进行混合检索（向量 + BM25）</p>
+    </div>
+  </section>
+
+  <!-- ── 技能库 ── -->
+  <section class="tab-panel" data-panel="skills">
+    <div class="panel-header">
+      <h2 class="panel-title">技能库</h2>
+      <span class="panel-meta" id="skills-count">—</span>
+    </div>
+    <div class="skill-grid" id="skill-grid">
+      <p class="empty-state">加载中...</p>
+    </div>
+  </section>
+
+  <!-- ── 系统 ── -->
+  <section class="tab-panel" data-panel="system">
+    <div class="panel-header">
+      <h2 class="panel-title">系统信息</h2>
+      <span class="panel-meta">EverOS 运行状态</span>
+    </div>
+    <div class="sys-cards" id="sys-cards">
+      <div class="sys-card">
+        <div class="sys-card__head">服务健康</div>
+        <div class="sys-card__body" id="sys-health">检查中...</div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card__head">API 端点</div>
+        <div class="sys-card__body" id="sys-endpoint">—</div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card__head">App / Project</div>
+        <div class="sys-card__body" id="sys-app">— / —</div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card__head">连接延迟</div>
+        <div class="sys-card__body" id="sys-latency">—</div>
+      </div>
+    </div>
+    <div class="panel-header" style="margin-top:var(--s-6)">
+      <h2 class="panel-title">组件详情</h2>
+    </div>
+    <div class="sys-details" id="sys-details">
+      <div class="sys-detail">
+        <div class="sys-detail__name">EverOS 版本</div>
+        <div class="sys-detail__val" id="sys-version">—</div>
+      </div>
+      <div class="sys-detail">
+        <div class="sys-detail__name">记忆总量</div>
+        <div class="sys-detail__val" id="sys-total-memories">—</div>
+      </div>
+      <div class="sys-detail">
+        <div class="sys-detail__name">运行模式</div>
+        <div class="sys-detail__val" id="sys-mode">—</div>
+      </div>
+      <div class="sys-detail">
+        <div class="sys-detail__name">Dashboard 端口</div>
+        <div class="sys-detail__val"><code class="standalone-port" id="sys-port">—</code></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 设置 ── -->
+  <section class="tab-panel" data-panel="settings">
+    <div class="panel-header">
+      <h2 class="panel-title">连接设置</h2>
+      <span class="panel-meta" id="settings-mode-label">插件内嵌</span>
+    </div>
+    <div class="settings-form" id="settings-form">
+      <div class="form-group">
+        <label>EverOS 服务地址</label>
+        <input id="set-url" class="input" type="text" placeholder="http://127.0.0.1:8765" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>App ID</label>
+          <input id="set-app" class="input" type="text" placeholder="astrbot" />
+        </div>
+        <div class="form-group">
+          <label>Project ID</label>
+          <input id="set-project" class="input" type="text" placeholder="default" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn--primary" id="set-save">保存配置</button>
+        <button class="btn" id="set-test">测试连接</button>
+      </div>
+      <pre class="set-result" id="set-result"></pre>
+    </div>
+    <div class="settings-info" id="settings-mode">
+      <p>当前模式：<strong id="mode-label">插件内嵌</strong></p>
+      <p class="text-muted">独立模式下可修改连接配置</p>
+    </div>
+  </section>
+
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

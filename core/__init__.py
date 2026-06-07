@@ -1,0 +1,1 @@
+"""EverOS Bridge — core module."""

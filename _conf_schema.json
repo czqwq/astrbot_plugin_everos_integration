@@ -1,0 +1,54 @@
+{
+  "everos_base_url": {
+    "description": "EverOS 服务地址",
+    "hint": "独立容器部署的默认地址为 http://127.0.0.1:8765",
+    "type": "string",
+    "default": "http://127.0.0.1:8765"
+  },
+  "enable_tools": {
+    "description": "启用 LLM 工具",
+    "hint": "开启后 Agent 可使用 everos_memorize / everos_recall 工具",
+    "type": "bool",
+    "default": true
+  },
+  "enable_webui": {
+    "description": "启用插件内嵌 WebUI",
+    "hint": "在 AstrBot 后台提供 /everos 管理界面",
+    "type": "bool",
+    "default": true
+  },
+  "standalone_webui_enabled": {
+    "description": "启用独立 WebUI 服务器",
+    "hint": "启用后插件自动启动独立 Web 服务器，访问 http://IP:18766 即可使用 Dashboard",
+    "type": "bool",
+    "default": true
+  },
+  "standalone_webui_host": {
+    "description": "独立 WebUI 监听地址",
+    "hint": "默认 0.0.0.0 表示监听所有网络接口",
+    "type": "string",
+    "default": "0.0.0.0"
+  },
+  "standalone_webui_port": {
+    "description": "独立 WebUI 访问端口",
+    "hint": "浏览器通过 http://IP:此端口 访问 Dashboard",
+    "type": "int",
+    "default": 18766
+  },
+  "app_id": {
+    "description": "应用标识",
+    "type": "string",
+    "default": "astrbot"
+  },
+  "project_id": {
+    "description": "项目标识",
+    "type": "string",
+    "default": "default"
+  },
+  "isolation_personas": {
+    "description": "记忆隔离白名单（逗号分隔）",
+    "hint": "在此列表里的人格使用独立记忆空间，列表外的人格共享全部记忆。例如：白芷,欣雨",
+    "type": "string",
+    "default": ""
+  }
+}
