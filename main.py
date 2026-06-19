@@ -30,6 +30,7 @@ from .core.standalone_server import StandaloneServer
 from .tools.everos_tools import EverOSLearnTool, EverOSMemorizeTool, EverOSRecallTool
 
 PLUGIN_NAME = "astrbot_plugin_everos_integration"
+KNOWN_USERS_FILE = "everos_known_users.json"
 
 
 def _normalize_item(item: dict, mtype: str = "episode") -> dict:
@@ -48,6 +49,19 @@ def _normalize_item(item: dict, mtype: str = "episode") -> dict:
                 item["content"] = pd.get("summary", json.dumps(pd, ensure_ascii=False)[:200])
             else:
                 item["content"] = str(pd)[:200]
+        elif mtype == "agent_case":
+            item["content"] = (
+                item.get("task_intent", "")
+                or item.get("key_insight", "")
+                or item.get("approach", "")
+                or json.dumps(item, ensure_ascii=False)[:200]
+            )
+        elif mtype == "agent_skill":
+            item["content"] = (
+                item.get("description", "")
+                or item.get("name", "")
+                or json.dumps(item, ensure_ascii=False)[:200]
+            )
         else:
             item["content"] = json.dumps(item, ensure_ascii=False)[:200]
     return item
@@ -75,6 +89,10 @@ class EverOSIntegrationPlugin(Star):
         self._healthy = False
         self._standalone_server: StandaloneServer | None = None
         self._known_user_ids: set[str] = set()  # 追踪聊天中出现的真实用户 ID
+        self._known_users_path = Path(self.data_dir) / KNOWN_USERS_FILE
+
+        # 恢复持久化存储的用户 ID（跨插件重启不丢失）
+        self._load_known_users()
 
         # 注册 Web API
         self._register_web_apis()
@@ -144,21 +162,15 @@ class EverOSIntegrationPlugin(Star):
                     seen_ids = set()
                     for uid in candidate_uids:
                         try:
-                            result = await self._client.memory_get(
+                            items = await self._client.memory_get_all(
                                 memory_type=mtype, user_id=uid, agent_id=uid,
                             )
-                            if isinstance(result, dict):
-                                data = result.get("data", result)
-                                if isinstance(data, dict):
-                                    items = data.get(mtype + "s", [])
-                                    for item in items:
-                                        mid = item.get("id", "")
-                                        if mid and mid not in seen_ids:
-                                            seen_ids.add(mid)
-                                            total += 1
-                                    tc = data.get("total_count", 0)
-                                    if tc > total:
-                                        total = tc
+                            for item in items:
+                                if isinstance(item, dict):
+                                    mid = item.get("id", "")
+                                    if mid and mid not in seen_ids:
+                                        seen_ids.add(mid)
+                                        total += 1
                         except Exception:
                             continue
                     stats[mtype] = total
@@ -178,7 +190,7 @@ class EverOSIntegrationPlugin(Star):
     async def api_memories(self):
         """GET /api/plug/everos_integration/memories
 
-        获取最近记忆（从所有类型中取最新 10 条）。
+        获取全部记忆（翻页直到耗尽，避免只读到前 20 条的 bug）。
         """
         if self._client is None:
             return jsonify({"ok": False, "error": "client not initialized", "data": {"items": []}})
@@ -190,27 +202,23 @@ class EverOSIntegrationPlugin(Star):
             for mtype in ("episode", "profile", "agent_case", "agent_skill"):
                 for uid in candidate_uids:
                     try:
-                        result = await self._client.memory_get(
+                        items = await self._client.memory_get_all(
                             memory_type=mtype,
                             user_id=uid, agent_id=uid,
                         )
-                        if isinstance(result, dict):
-                            data = result.get("data", result)
-                            if isinstance(data, dict):
-                                items = data.get(mtype + "s", [])
-                                for item in items:
-                                    if isinstance(item, dict):
-                                        mid = item.get("id", "")
-                                        if mid and mid in seen_ids:
-                                            continue
-                                        seen_ids.add(mid)
-                                        item["memory_type"] = item.get("memory_type") or mtype
-                                        item = _normalize_item(item, mtype)
-                                        all_items.append(item)
+                        for item in items:
+                            if isinstance(item, dict):
+                                mid = item.get("id", "")
+                                if mid and mid in seen_ids:
+                                    continue
+                                seen_ids.add(mid)
+                                item["memory_type"] = item.get("memory_type") or mtype
+                                item = _normalize_item(item, mtype)
+                                all_items.append(item)
                     except Exception:
                         continue
 
-            # 按时间倒序，取前 10
+            # 按时间倒序
             def _sort_key(item):
                 ts = item.get("timestamp") or item.get("created_at") or 0
                 if isinstance(ts, str):
@@ -223,7 +231,6 @@ class EverOSIntegrationPlugin(Star):
 
             if all_items:
                 all_items.sort(key=_sort_key, reverse=True)
-                all_items = all_items[:10]
 
             return jsonify({"ok": True, "data": {"items": all_items}})
         except Exception as e:
@@ -308,7 +315,7 @@ class EverOSIntegrationPlugin(Star):
     async def api_memories_by_type(self):
         """POST /api/plug/everos_integration/memories-by-type
 
-        按类型获取记忆列表。
+        按类型获取全部记忆列表（翻页直到耗尽）。
         """
         if self._client is None:
             return jsonify({"ok": False, "error": "client not initialized", "data": {"items": []}})
@@ -329,23 +336,19 @@ class EverOSIntegrationPlugin(Star):
             seen_ids = set()
             for uid in candidate_uids:
                 try:
-                    result = await self._client.memory_get(
+                    items = await self._client.memory_get_all(
                         memory_type=memory_type,
                         user_id=uid, agent_id=uid,
                     )
-                    if isinstance(result, dict):
-                        data = result.get("data", result)
-                        if isinstance(data, dict):
-                            items = data.get(memory_type + "s", [])
-                            for item in items:
-                                if isinstance(item, dict):
-                                    mid = item.get("id", "")
-                                    if mid and mid in seen_ids:
-                                        continue
-                                    seen_ids.add(mid)
-                                    item["memory_type"] = item.get("memory_type") or memory_type
-                                    item = _normalize_item(item, memory_type)
-                                    all_items.append(item)
+                    for item in items:
+                        if isinstance(item, dict):
+                            mid = item.get("id", "")
+                            if mid and mid in seen_ids:
+                                continue
+                            seen_ids.add(mid)
+                            item["memory_type"] = item.get("memory_type") or memory_type
+                            item = _normalize_item(item, memory_type)
+                            all_items.append(item)
                 except Exception:
                     continue
             return jsonify({"ok": True, "data": {"items": all_items}})
@@ -455,11 +458,15 @@ class EverOSIntegrationPlugin(Star):
     # ─── 命令组 ──────────────────────────────────────────────────────
 
     def _track_user(self, event: AstrMessageEvent) -> None:
-        """从事件中记录用户 ID，供 Dashboard 查询时使用。"""
+        """从事件中记录用户 ID，供 Dashboard 查询时使用。
+
+        同时持久化到磁盘，跨插件重启不丢失。
+        """
         try:
             uid = event.get_sender_id()
-            if uid:
+            if uid and str(uid) not in self._known_user_ids:
                 self._known_user_ids.add(str(uid))
+                self._save_known_users()
         except Exception:
             pass
 
@@ -471,16 +478,51 @@ class EverOSIntegrationPlugin(Star):
         except Exception:
             return ""
 
+    def _load_known_users(self) -> None:
+        """从磁盘恢复持久化存储的用户 ID 列表。"""
+        try:
+            if self._known_users_path.exists():
+                data = json.loads(self._known_users_path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    self._known_user_ids.update(data)
+                    logger.info(f"📋 已恢复 {len(data)} 个已知用户 ID")
+        except Exception as e:
+            logger.warning(f"恢复已知用户 ID 失败: {e}")
+
+    def _save_known_users(self) -> None:
+        """将已知用户 ID 持久化到磁盘。"""
+        try:
+            self._known_users_path.parent.mkdir(parents=True, exist_ok=True)
+            self._known_users_path.write_text(
+                json.dumps(sorted(self._known_user_ids), ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning(f"保存已知用户 ID 失败: {e}")
+
     def _get_candidate_uids(self) -> list[str]:
-        """获取用于 EverOS 查询的候选 user_id/agent_id 列表。"""
+        """获取用于 EverOS 查询的候选 user_id/agent_id 列表。
+
+        包含：配置的 app_id、常见默认值、持久化的已知用户 ID、
+        以及配置中手动指定的 extra_user_ids。
+        """
         base = [
             self.config.app_id,
             "default",
             "webui",
+            "assistant",
         ]
-        for uid in self._known_user_ids:
+        # 持久化的已知用户 ID（从聊天中追踪）
+        for uid in sorted(self._known_user_ids):
             if uid not in base:
                 base.append(uid)
+        # 配置中手动指定的额外 user_id
+        extra = self.config.get("extra_user_ids", "")
+        if extra and isinstance(extra, str) and extra.strip():
+            for uid in extra.split(","):
+                uid = uid.strip()
+                if uid and uid not in base:
+                    base.append(uid)
         return base
 
     @filter.command_group("everos")

@@ -14,6 +14,7 @@ _DEFAULTS: dict[str, Any] = {
     "standalone_webui_host": "0.0.0.0",
     "standalone_webui_port": 18766,
     "isolation_personas": "",
+    "extra_user_ids": "",
 }
 
 
@@ -45,6 +46,14 @@ class ConfigManager:
         return self.get("project_id")
 
     # ─── 记忆隔离 ──────────────────────────────────────────────
+
+    @property
+    def extra_user_ids(self) -> list[str]:
+        """获取手动指定的额外 user_id 列表（逗号分隔）。"""
+        raw = self.get("extra_user_ids", "")
+        if not raw or not raw.strip():
+            return []
+        return [uid.strip() for uid in raw.split(",") if uid.strip()]
 
     @property
     def isolation_personas(self) -> list[str]:

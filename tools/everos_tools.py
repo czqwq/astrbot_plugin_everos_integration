@@ -2,10 +2,46 @@
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
+
+from astrbot.api import logger
+from astrbot.api.star import StarTools
 
 from ..core.config_manager import ConfigManager
 from ..core.everos_client import EverOSClient
+
+_KNOWN_USERS_FILE = "everos_known_users.json"
+
+
+def _track_user_to_file(user_id: str) -> None:
+    """将 user_id 持久化到已知用户文件，确保跨插件重启不丢失。
+
+    Dashboard 读取此文件来扩展候选查询 ID，解决「只搜 default 漏掉 QQ 号」的 bug。
+    """
+    if not user_id or user_id in ("default", "webui"):
+        return
+    try:
+        data_dir = Path(StarTools.get_data_dir())
+        path = data_dir / _KNOWN_USERS_FILE
+        known: set[str] = set()
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    known.update(data)
+            except Exception:
+                pass
+        if user_id not in known:
+            known.add(user_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(sorted(known), ensure_ascii=False),
+                encoding="utf-8",
+            )
+    except Exception as e:
+        logger.warning(f"[EverOS] 持久化用户 ID 失败: {e}")
 
 
 class EverOSMemorizeTool:
@@ -63,6 +99,7 @@ class EverOSMemorizeTool:
 
         # 默认使用 default 作为 user_id
         resolved_user_id = user_id or persona_name or "default"
+        _track_user_to_file(resolved_user_id)
         ts = int(time.time() * 1000)
         messages = [
             {
@@ -143,6 +180,7 @@ class EverOSLearnTool:
         app_id = self._config.get_app_id_for(persona_name or None)
         project_id = self._config.project_id
 
+        _track_user_to_file("assistant")  # 追踪 agent track 用户
         ts = int(time.time() * 1000)
         # 使用 role="assistant" 触发 Agent Track 提炼 Case/Skill
         messages = [
@@ -221,6 +259,7 @@ class EverOSRecallTool:
         project_id = self._config.project_id
         # EverOS API 要求 user_id 至少 1 个字符
         resolved_user_id = user_id or persona_name or "default"
+        _track_user_to_file(resolved_user_id)
 
         try:
             # 同时搜多个 user_id，覆盖不同来源的存储

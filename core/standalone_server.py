@@ -47,6 +47,19 @@ def _normalize_item(item: dict, mtype: str = "episode") -> dict:
                 item["content"] = pd.get("summary", json.dumps(pd, ensure_ascii=False)[:200])
             else:
                 item["content"] = str(pd)[:200]
+        elif mtype == "agent_case":
+            item["content"] = (
+                item.get("task_intent", "")
+                or item.get("key_insight", "")
+                or item.get("approach", "")
+                or json.dumps(item, ensure_ascii=False)[:200]
+            )
+        elif mtype == "agent_skill":
+            item["content"] = (
+                item.get("description", "")
+                or item.get("name", "")
+                or json.dumps(item, ensure_ascii=False)[:200]
+            )
         else:
             item["content"] = json.dumps(item, ensure_ascii=False)[:200]
     return item
@@ -80,26 +93,81 @@ class StandaloneServer:
             self._http_client = httpx.AsyncClient(timeout=30.0, verify=False)
         return self._http_client
 
+    async def _fetch_all_memories_for(
+        self, client: httpx.AsyncClient, base_url: str,
+        memory_type: str, uid: str, owner_field: str,
+        app_id: str, project_id: str, page_size: int = 100,
+    ) -> list[dict]:
+        """分页获取某 (type, uid) 下的全部记忆条目。
+
+        自动翻页直到 total_count 耗尽，修复 Dashboard 只读到前 20 条的 bug。
+        """
+        all_items: list[dict] = []
+        seen_ids: set[str] = set()
+        page = 1
+        max_pages = 50  # 安全上限
+
+        while page <= max_pages:
+            body: dict = {
+                "memory_type": memory_type,
+                owner_field: uid,
+                "app_id": app_id,
+                "project_id": project_id,
+                "page": page,
+                "page_size": page_size,
+            }
+            try:
+                r = await client.post(f"{base_url}/api/v1/memory/get", json=body)
+                r.raise_for_status()
+                data = r.json()
+                d = data.get("data", {})
+                items = d.get(memory_type + "s", [])
+                if not items:
+                    break
+                for item in items:
+                    if isinstance(item, dict):
+                        mid = item.get("id", "")
+                        if mid and mid not in seen_ids:
+                            seen_ids.add(mid)
+                            all_items.append(item)
+                total = d.get("total_count", 0)
+                if len(items) < page_size or page * page_size >= total:
+                    break
+                page += 1
+            except Exception:
+                break
+
+        return all_items
+
     def _get_candidate_uids(self) -> list[str]:
         """获取用于 EverOS 查询的候选 user_id/agent_id 列表。
 
-        包含：配置的 app_id、常见默认值、以及插件从聊天事件中追踪到的真实 QQ 用户 ID。
+        包含：配置的 app_id、常见默认值、持久化的已知用户 ID、
+        以及配置中手动指定的 extra_user_ids。
         去重并保持优先级顺序。
         """
         base = [
             self.config.get("app_id", "astrbot"),
             "default",
             "webui",
+            "assistant",
         ]
-        # 追加插件追踪到的真实用户 ID（如 QQ 号）
+        # 追加插件追踪到的真实用户 ID（如 QQ 号，含持久化存储）
         try:
             tracked = getattr(self.plugin, "_known_user_ids", None)
             if tracked:
-                for uid in tracked:
+                for uid in sorted(tracked):
                     if uid not in base:
                         base.append(uid)
         except Exception:
             pass
+        # 配置中手动指定的额外 user_id
+        extra = self.config.get("extra_user_ids", "")
+        if extra and isinstance(extra, str) and extra.strip():
+            for uid in extra.split(","):
+                uid = uid.strip()
+                if uid and uid not in base:
+                    base.append(uid)
         return base
 
     def _get_app_id(self) -> str:
@@ -184,32 +252,14 @@ class StandaloneServer:
                 agent_kinds = {"agent_case", "agent_skill"}
                 for mtype in ("episode", "profile", "agent_case", "agent_skill"):
                     total = 0
-                    seen_ids = set()
                     for uid in candidate_uids:
-                        # agent_skill / agent_case 用 agent_id，其余用 user_id
                         owner_field = "agent_id" if mtype in agent_kinds else "user_id"
                         try:
-                            r = await client.post(
-                                f"{base_url}/api/v1/memory/get",
-                                json={
-                                    "memory_type": mtype,
-                                    owner_field: uid,
-                                    "app_id": app_id,
-                                    "project_id": project_id,
-                                },
+                            items = await self._fetch_all_memories_for(
+                                client, base_url, mtype, uid, owner_field,
+                                app_id, project_id,
                             )
-                            data = r.json()
-                            d = data.get("data", {})
-                            items = d.get(mtype + "s", [])
-                            for item in items:
-                                mid = item.get("id", "")
-                                if mid and mid not in seen_ids:
-                                    seen_ids.add(mid)
-                                    total += 1
-                            # 如果 API 返回了 total_count，用最大值
-                            tc = d.get("total_count", 0)
-                            if tc > total:
-                                total = tc
+                            total += len(items)
                         except Exception:
                             continue
                     stats[mtype] = total
@@ -234,7 +284,7 @@ class StandaloneServer:
 
         @self.app.get("/api/everos/memories")
         async def api_memories():
-            """获取各类型记忆（最近活动）。"""
+            """获取全部记忆（翻页直到耗尽，避免只读到前 20 条的 bug）。"""
             client = self._get_client()
             base_url = self._get_everos_url()
             app_id = self._get_app_id()
@@ -246,21 +296,12 @@ class StandaloneServer:
                 agent_kinds = {"agent_case", "agent_skill"}
                 for mtype in ("episode", "profile", "agent_case", "agent_skill"):
                     for uid in candidate_uids:
-                        # agent_skill / agent_case 用 agent_id，其余用 user_id
                         owner_field = "agent_id" if mtype in agent_kinds else "user_id"
                         try:
-                            r = await client.post(
-                                f"{base_url}/api/v1/memory/get",
-                                json={
-                                    "memory_type": mtype,
-                                    owner_field: uid,
-                                    "app_id": app_id,
-                                    "project_id": project_id,
-                                },
+                            items = await self._fetch_all_memories_for(
+                                client, base_url, mtype, uid, owner_field,
+                                app_id, project_id,
                             )
-                            data = r.json()
-                            d = data.get("data", {})
-                            items = d.get(mtype + "s", [])
                             for item in items:
                                 if isinstance(item, dict):
                                     mid = item.get("id", "")
@@ -317,7 +358,7 @@ class StandaloneServer:
 
         @self.app.post("/api/everos/memories-by-type")
         async def api_memories_by_type(request: Request):
-            """按类型获取记忆。"""
+            """按类型获取全部记忆（翻页直到耗尽）。"""
             body = await request.json()
             raw_type = body.get("memory_type", "episode")
             # 旧版兼容：atomic_fact 已合并到 episode
@@ -333,22 +374,12 @@ class StandaloneServer:
                 all_items = []
                 seen_ids = set()
                 for uid in candidate_uids:
-                    # agent_skill / agent_case 用 agent_id，其余用 user_id
                     owner_field = "agent_id" if memory_type in agent_kinds else "user_id"
                     try:
-                        r = await client.post(
-                            f"{base_url}/api/v1/memory/get",
-                            json={
-                                "memory_type": memory_type,
-                                owner_field: uid,
-                                "app_id": app_id,
-                                "project_id": project_id,
-                            },
+                        items = await self._fetch_all_memories_for(
+                            client, base_url, memory_type, uid, owner_field,
+                            app_id, project_id,
                         )
-                        r.raise_for_status()
-                        data = r.json()
-                        d = data.get("data", {})
-                        items = d.get(memory_type + "s", [])
                         for item in items:
                             if isinstance(item, dict):
                                 mid = item.get("id", "")

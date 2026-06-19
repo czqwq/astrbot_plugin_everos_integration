@@ -159,6 +159,8 @@ class EverOSClient:
         agent_id: str = "",
         app_id: str = "astrbot",
         project_id: str = "default",
+        page: int = 1,
+        page_size: int = 20,
     ) -> dict[str, Any]:
         """POST /api/v1/memory/get
 
@@ -166,6 +168,8 @@ class EverOSClient:
         或 agent_id（agent 轨道），两者互斥。
 
         memory_type: episode / profile / agent_case / agent_skill
+        page: 页码 (1-based)
+        page_size: 每页数量 (1-100)
         """
         normalized_type = self._normalize_memory_type(memory_type)
         owner_field, owner_value = self._owner_id_for(
@@ -176,12 +180,61 @@ class EverOSClient:
             owner_field: owner_value,
             "app_id": app_id,
             "project_id": project_id,
+            "page": page,
+            "page_size": min(page_size, 100),
         }
         resp = await self._client.post(
             f"{self.base_url}/api/v1/memory/get", json=payload
         )
         resp.raise_for_status()
         return resp.json()
+
+    async def memory_get_all(
+        self,
+        memory_type: str = "episode",
+        user_id: str = "default",
+        agent_id: str = "",
+        app_id: str = "astrbot",
+        project_id: str = "default",
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """分页获取某 (memory_type, owner_id) 下的全部条目。
+
+        自动翻页直到 total_count 耗尽，避免 Dashboard 只读到前 20 条的 bug。
+        """
+        all_items: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        page = 1
+        max_pages = 50  # 安全上限：最多 50 页 × 100 = 5000 条/类型
+
+        while page <= max_pages:
+            result = await self.memory_get(
+                memory_type=memory_type,
+                user_id=user_id,
+                agent_id=agent_id,
+                app_id=app_id,
+                project_id=project_id,
+                page=page,
+                page_size=page_size,
+            )
+            data = result.get("data", result) if isinstance(result, dict) else {}
+            items = data.get(f"{memory_type}s", []) if isinstance(data, dict) else []
+            if not items:
+                break
+
+            for item in items:
+                if isinstance(item, dict):
+                    mid = item.get("id", "")
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        all_items.append(item)
+
+            total = data.get("total_count", 0) if isinstance(data, dict) else 0
+            if len(items) < page_size or page * page_size >= total:
+                break
+            page += 1
+
+        return all_items
 
     # ─── 统计 ──────────────────────────────────────────────────────
 
