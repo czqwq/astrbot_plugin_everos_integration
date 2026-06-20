@@ -392,6 +392,52 @@ LLM 工具每次调用 `memory_add` 后立即调用 `memory_flush`（`is_final=T
 
 ---
 
+## 新增功能：强制记忆检索（RAG 预处理）
+
+### 功能说明
+
+`force_memory_recall` 开关（默认关闭）。开启后，每次 LLM 被调用前，插件会**自动以用户消息为查询词检索 EverOS 记忆库**，并将结果注入到系统提示词中。LLM 在思考前就能「看到」相关历史上下文，不依赖它主动调用 `everos_recall` 工具。
+
+### 配置方式
+
+```json
+{
+    "force_memory_recall": true
+}
+```
+
+或在 AstrBot 插件配置页面勾选。
+
+### 技术实现
+
+使用 AstrBot 的 `OnLLMRequestEvent` 钩子：
+
+```
+用户消息 → Pipeline → OnLLMRequestEvent
+    → _on_llm_request_pre_recall()
+    → 提取 req.prompt / req.contexts 中的用户查询
+    → 调用 EverOS /api/v1/memory/search（覆盖所有 candidate_uids）
+    → 检索到记忆 → 注入 req.system_prompt 末尾
+    → 未检索到 → 静默跳过，LLM 正常思考
+```
+
+注入格式：
+```
+[EverOS 记忆检索结果 — 请在回答时参考以下上下文]
+1. [episode] 用户czqwq的中文名是莉莉丝...
+2. [profile] 用户偏好：喜欢喝冰美式，不加糖...
+[/EverOS 记忆检索结果]
+```
+
+### 关键文件
+
+| 文件 | 变更 |
+|------|------|
+| `core/config_manager.py` | 新增 `force_memory_recall` 配置项及属性 |
+| `main.py` | 新增 `_on_llm_request_pre_recall()` — `@filter.on_llm_request()` 钩子 |
+
+---
+
 ## 七、后续建议
 
 1. **EverOS 服务端增强**：添加 `GET /api/v1/memory/owners` 端点，返回所有存在的 owner_id 列表（通过扫描 markdown 目录），让 Dashboard 能自主发现所有用户

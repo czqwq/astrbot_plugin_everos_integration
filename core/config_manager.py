@@ -18,6 +18,8 @@ _DEFAULTS: dict[str, Any] = {
     # EverOS 边界检测阈值（与 EverOS default.toml [boundary_detection] 保持一致）
     "boundary_token_limit": 65536,
     "boundary_msg_limit": 500,
+    # 强制 LLM 在思考前先检索记忆（RAG 预处理）
+    "force_memory_recall": False,
 }
 
 
@@ -67,6 +69,11 @@ class ConfigManager:
     def boundary_msg_limit(self) -> int:
         """EverOS 边界检测的消息条数硬上限（与 EverOS [boundary_detection] 一致）。"""
         return int(self.get("boundary_msg_limit", 500))
+
+    @property
+    def force_memory_recall(self) -> bool:
+        """是否在 LLM 思考前强制检索 EverOS 记忆（RAG 预处理）。"""
+        return bool(self.get("force_memory_recall", False))
 
     @property
     def isolation_personas(self) -> list[str]:

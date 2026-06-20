@@ -21,6 +21,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import PermissionType, permission_type
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools, register
 from quart import jsonify, request
 
@@ -540,6 +541,109 @@ class EverOSIntegrationPlugin(Star):
                 if uid and uid not in base:
                     base.append(uid)
         return base
+
+    # ─── 强制记忆检索（RAG 预处理）────────────────────────────────
+
+    @filter.on_llm_request()
+    async def _on_llm_request_pre_recall(
+        self, event: AstrMessageEvent, req: ProviderRequest
+    ) -> None:
+        """在 LLM 被调用前，强制检索 EverOS 记忆并注入上下文。
+
+        当 ``force_memory_recall`` 配置开启时，自动以用户消息内容为
+        查询词检索 EverOS 记忆库。检索到的记忆会注入到系统提示词中，
+        让 LLM 在思考前先「看到」相关历史上下文。
+
+        未检索到任何记忆时，不修改系统提示词（静默跳过），
+        LLM 按正常流程思考。
+        """
+        if not self.config.force_memory_recall:
+            return
+        if not self._client or not self._healthy:
+            return
+
+        # 提取用户查询：优先 req.prompt，其次 contexts 中最后一条 user 消息
+        query = (req.prompt or "").strip()
+        if not query:
+            try:
+                for msg in reversed(req.contexts or []):
+                    if isinstance(msg, dict) and msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, str) and content.strip():
+                            query = content.strip()
+                            break
+            except Exception:
+                pass
+        if not query:
+            return
+
+        # 从配置中取候选 user_id（首选用当前 event 的 sender_id）
+        tracker_uid = ""
+        try:
+            tracker_uid = str(event.get_sender_id()) if event.get_sender_id() else ""
+        except Exception:
+            pass
+        candidate_uids = self._get_candidate_uids()
+        if tracker_uid and tracker_uid not in candidate_uids:
+            candidate_uids.insert(0, tracker_uid)
+
+        # 检索记忆
+        memories: list[dict] = []
+        seen_ids: set[str] = set()
+        for uid in candidate_uids:
+            try:
+                result = await self._client.memory_search(
+                    query=query,
+                    user_id=uid,
+                    app_id=self.config.app_id,
+                    project_id=self.config.project_id,
+                    top_k=3,
+                )
+                raw_data = result.get("data", {}) if isinstance(result, dict) else {}
+                for cat in ("episodes", "profiles", "agent_cases", "agent_skills"):
+                    for item in raw_data.get(cat, []):
+                        if isinstance(item, dict):
+                            mid = item.get("id", "")
+                            if mid and mid not in seen_ids:
+                                seen_ids.add(mid)
+                                memories.append(item)
+                if len(memories) >= 6:
+                    break
+            except Exception:
+                continue
+
+        if not memories:
+            return  # 无记忆 → 静默跳过，LLM 正常思考
+
+        # 渲染记忆片段
+        lines = [
+            "",
+            "[EverOS 记忆检索结果 — 请在回答时参考以下上下文]",
+        ]
+        for i, mem in enumerate(memories, 1):
+            mtype = mem.get("memory_type", "memory")
+            content = (
+                mem.get("episode")
+                or mem.get("summary")
+                or mem.get("content")
+                or mem.get("task_intent")
+                or ""
+            )
+            if not content:
+                continue
+            # 截断过长的内容
+            content = content[:300] + ("..." if len(str(content)) > 300 else "")
+            lines.append(f"{i}. [{mtype}] {content}")
+
+        lines.append("[/EverOS 记忆检索结果]")
+        recall_block = "\n".join(lines)
+
+        # 注入到 system_prompt 末尾（在工具定义之后，对话开始之前）
+        req.system_prompt = (req.system_prompt or "") + "\n" + recall_block
+        logger.info(
+            f"[EverOS] 强制记忆检索: query={query[:50]!r}, "
+            f"found={len(memories)}, injected_to_system_prompt"
+        )
 
     @filter.command_group("everos")
     def everos(self):
