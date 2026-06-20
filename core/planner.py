@@ -21,11 +21,20 @@ from astrbot.api import logger
 
 RECALL_PLANNER_SYSTEM = """\
 你是一个记忆检索决策助手。分析用户消息，判断是否需要从长期记忆中检索信息。
+记忆库中可能存储了：用户个人信息、偏好、习惯、计划；之前对话的内容和决策；
+AI 自身的身份设定、名字、角色；用户与 AI 的关系、约定、秘密等。
 
-判断标准：
-- 如果用户的问题需要关于他/她个人信息、偏好、历史、之前讨论过的话题 — 需要检索
-- 如果只是简单问候、闲聊、或者不依赖记忆就能回答的问题 — 不需要检索
-- 如果用户明确提到"之前"、"上次"、"还记得"、"我的" — 需要检索
+**需要检索 (recall) 的情况（宁可多检不可漏检）：**
+- 用户询问任何「是什么/是谁/叫什么/什么时候/为什么/怎么样」的问题
+- 用户提到人物、名字、地点、事件、偏好
+- 用户说「之前/上次/还记得/我的/我们的/你之前说过」
+- 用户询问 AI 关于自身的信息（名字、能力、角色、设定）
+- 任何可能从过去对话中找到答案的问题
+- 不确定是否需要 → 选择 recall（宁可多检）
+
+**不需要检索 (skip) 的情况（极少）：**
+- 纯粹的「你好/晚安/哈哈/嗯/哦」之类无信息量的消息
+- 用户说「继续」但上文已经提供完整上下文
 
 严格按以下 JSON 格式回复（不要包含其他内容）：
 {"action": "recall", "query": "一句话概括需要检索的内容"}
@@ -35,13 +44,19 @@ RECALL_PLANNER_SYSTEM = """\
 SAVE_PLANNER_SYSTEM = """\
 你是一个记忆保存决策助手。分析用户消息，判断是否有值得保存到长期记忆的信息。
 
-判断标准：
-- 用户透露的个人信息（姓名、偏好、习惯、计划、经历）— 需要保存
-- 用户表达的重要观点、决定、或请求未来参考的事项 — 需要保存
-- 简单问候、闲聊、或不含个人信息的问题 — 不需要保存
+**需要保存 (save) 的情况：**
+- 用户透露个人信息：姓名、偏好、习惯、计划、经历、关系、秘密
+- 用户表达重要观点、决定、或要求未来记住/参考的事项
+- 用户建立或修改了与 AI 的约定、规则、角色设定
+- 对话中出现了对后续交流有价值的事实或上下文
+- 不确定是否需要保存 → 选择 save（宁可多存）
+
+**不需要保存 (skip) 的情况（极少）：**
+- 纯粹的「你好/晚安/哈哈/嗯/哦」之类无信息量的消息
+- 明显的一次性指令（如「帮我查一下天气」）
 
 严格按以下 JSON 格式回复（不要包含其他内容）：
-{"action": "save", "content": "一句话概括要保存的内容（中文，包含上下文）"}
+{"action": "save", "content": "一句话概括要保存的内容（中文第三人称，包含上下文）"}
 或
 {"action": "skip", "content": ""}"""
 
@@ -59,7 +74,7 @@ def _parse_planner_json(text: str) -> dict[str, str]:
     # 尝试提取 JSON 块
     import re
 
-    m = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+    m = re.search(r'\{[^{}]*}', text, re.DOTALL)
     if m:
         try:
             return json.loads(m.group(0))
@@ -146,13 +161,13 @@ class Planner:
         try:
             # 尝试从插件上下文获取
             return self._plugin.context.get_using_provider().meta().id
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             pass
         # 尝试从 provider_manager 获取第一个可用 provider
         try:
             providers = self._plugin.context.get_all_providers()
             if providers:
                 return providers[0].meta().id
-        except Exception:
+        except (AttributeError, IndexError, TypeError):
             pass
         return ""
